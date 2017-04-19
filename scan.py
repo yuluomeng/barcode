@@ -1,5 +1,6 @@
 
 import numpy as np
+from PIL import Image, ImageFilter
 
 
 def partition(l, n):
@@ -10,23 +11,40 @@ class UPC(object):
 
     LOOKUP = {
         (3, 2, 1, 1): '0',
+        (1, 1, 2, 3): '0',
         (2, 2, 2, 1): '1',
+        (1, 2, 2, 2): '1',
         (2, 1, 2, 2): '2',
+        (2, 2, 1, 2): '2',
         (1, 4, 1, 1): '3',
+        (1, 1, 4, 1): '3',
         (1, 1, 3, 2): '4',
+        (2, 3, 1, 1): '4',
         (1, 2, 3, 1): '5',
+        (1, 3, 2, 1): '5',
         (1, 1, 1, 4): '6',
+        (4, 1, 1, 1): '6',
         (1, 3, 1, 2): '7',
+        (2, 1, 3, 1): '7',
         (1, 2, 1, 3): '8',
+        (3, 1, 2, 1): '8',
         (3, 1, 1, 2): '9',
+        (2, 1, 1, 3): '9',
     }
+
+    ## Lowest shade for what we'll consider a white pixel
+    WHITE_PIXEL_CUTOFF = 200
 
     ## proprotion of the the barcode bars compared to the size of the image.
     MIN_BAR_PROPORTION = 0.6
     MAX_BAR_PROPORTION = 0.95
 
+    MIN_WIDTH = 640
+
     def __init__(self, img):
-        self.img = img
+        self.img = img.resize(
+            (max(img.width, self.MIN_WIDTH), img.height), Image.BICUBIC)
+        self.img = self.img.filter(ImageFilter.UnsharpMask).convert('1')
         self.width, self.height = self.img.size
         self.short_bar_heights, self.tall_bar_heights = self.find_bar_heights()
 
@@ -34,9 +52,20 @@ class UPC(object):
         """Calculates the digits in the barcode"""
 
         barcode = []
+        spacing = [w for group in self.calc_spacing() for w in group]
+        (_, (_, b1, b2, b3, _)) = np.histogram(spacing, 4)
+
         for group in self.calc_spacing():
-            group_min = min(group)
-            normalized = np.floor(group / group_min)
+            normalized = []
+            for width in group:
+                if width <= b1:
+                    normalized.append(1)
+                elif width <= b2:
+                    normalized.append(2)
+                elif width <= b3:
+                    normalized.append(3)
+                else:
+                    normalized.append(4)
 
             for part in partition(normalized, 4):
                 barcode.append(self.LOOKUP.get(part, -1))
@@ -158,10 +187,10 @@ class UPC(object):
         height = 0
         found_black_pixel = False
         for color in col:
-            if color > 0 and found_black_pixel:
+            if color > self.WHITE_PIXEL_CUTOFF and found_black_pixel:
                 break
 
-            if color > 0:
+            if color > self.WHITE_PIXEL_CUTOFF:
                 continue
 
             if not found_black_pixel:
